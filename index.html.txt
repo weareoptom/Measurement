@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Professional Eyewear Kit V8.4</title>
+    <!-- 引入 React, Tailwind, Lucide -->
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&family=JetBrains+Mono:wght@700&display=swap');
+        body { font-family: 'Inter', sans-serif; background-color: #050505; color: white; margin: 0; overflow: hidden; }
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        input[type=range] { -webkit-appearance: none; background: transparent; cursor: pointer; width: 100%; }
+        input[type=range]::-webkit-slider-runnable-track { height: 2px; background: rgba(255,255,255,0.1); border-radius: 10px; }
+        input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; height: 18px; width: 18px; border-radius: 50%; background: #3b82f6; border: 2px solid #fff; margin-top: -8px; box-shadow: 0 4px 10px rgba(0,0,0,0.5); }
+        * { -webkit-touch-callout: none !important; -webkit-user-select: none !important; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/javascript">
+        const { useState, useRef, useEffect, useCallback, useMemo } = React;
+
+        // 引入需要的圖標
+        const Icons = {
+            Camera: () => `<i data-lucide="camera"></i>`,
+            Refresh: () => `<i data-lucide="refresh-cw"></i>`,
+            Flip: () => `<i data-lucide="flip-horizontal"></i>`,
+            Grid: () => `<i data-lucide="grid-3x3"></i>`,
+            X: () => `<i data-lucide="x"></i>`,
+            Check: () => `<i data-lucide="check"></i>`,
+            RotateCcw: () => `<i data-lucide="rotate-ccw"></i>`,
+            Target: () => `<i data-lucide="target"></i>`,
+            Sun: () => `<i data-lucide="sun"></i>`,
+            Contrast: () => `<i data-lucide="contrast"></i>`,
+            Share: () => `<i data-lucide="share-2"></i>`,
+            Shield: () => `<i data-lucide="shield-check"></i>`,
+            Alert: () => `<i data-lucide="alert-triangle"></i>`,
+            Power: () => `<i data-lucide="zap"></i>`
+        };
+
+        const App = () => {
+            const [photos, setPhotos] = useState([]);
+            const [viewingPhoto, setViewingPhoto] = useState(null);
+            const [brightness, setBrightness] = useState(100);
+            const [contrast, setContrast] = useState(100);
+            const [hue, setHue] = useState(0);
+            const [isMirrored, setIsMirrored] = useState(true);
+            const [showGuide, setShowGuide] = useState(true);
+            const [facingMode, setFacingMode] = useState('user');
+
+            // 姿態狀態
+            const [pitch, setPitch] = useState(0);
+            const [roll, setRoll] = useState(0);
+            const [isLevel, setIsLevel] = useState(false);
+            const [sensorStatus, setSensorStatus] = useState('uninitialized');
+
+            // 量度狀態
+            const [workflow, setWorkflow] = useState('none');
+            const [points, setPoints] = useState([]);
+            const [crosshair, setCrosshair] = useState(null);
+            const [pixelRatio, setPixelRatio] = useState(null);
+
+            const videoRef = useRef(null);
+            const imgRef = useRef(null);
+
+            // 初始化 Lucide 圖標
+            useEffect(() => { lucide.createIcons(); });
+
+            // 相機邏輯
+            const initCamera = useCallback(async () => {
+                try {
+                    const stream = await navigator.mediaDevices.getUserMedia({
+                        video: { facingMode, width: { ideal: 1920 }, height: { ideal: 1080 } },
+                        audio: false
+                    });
+                    if (videoRef.current) videoRef.current.srcObject = stream;
+                } catch (e) { console.error("Camera fail", e); }
+            }, [facingMode]);
+
+            useEffect(() => { initCamera(); }, [initCamera]);
+
+            // 感測器處理 (橫向 iPad 優化)
+            const handleOrientation = useCallback((e) => {
+                setSensorStatus('active');
+                let p = e.beta; // 前後
+                let r = e.gamma; // 左右
+                
+                // 偵測是否為橫向
+                const isLandscape = Math.abs(window.orientation) === 90;
+                
+                setPitch(p);
+                setRoll(r);
+                
+                // 規則: Pitch 90±3, Roll 0±3
+                setIsLevel(Math.abs(p - 90) <= 3 && Math.abs(r) <= 3);
+            }, []);
+
+            const requestPermission = async () => {
+                if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+                    const res = await DeviceOrientationEvent.requestPermission();
+                    if (res === 'granted') {
+                        window.addEventListener('deviceorientation', handleOrientation, true);
+                        setSensorStatus('active');
+                    }
+                } else {
+                    window.addEventListener('deviceorientation', handleOrientation, true);
+                    setSensorStatus('active');
+                }
+            };
+
+            const takePhoto = () => {
+                if (!isLevel && sensorStatus !== 'bypassed') return;
+                const canvas = document.createElement('canvas');
+                canvas.width = videoRef.current.videoWidth;
+                canvas.height = videoRef.current.videoHeight;
+                const ctx = canvas.getContext('2d');
+                ctx.filter = `brightness(${brightness}%) contrast(${contrast}%) hue-rotate(${hue}deg)`;
+                if (isMirrored) { ctx.translate(canvas.width, 0); ctx.scale(-1, 1); }
+                ctx.drawImage(videoRef.current, 0, 0);
+                setPhotos([{ id: Date.now(), url: canvas.toDataURL('image/jpeg', 0.9) }, ...photos]);
+            };
+
+            return React.createElement('div', { className: "flex flex-col h-screen w-screen bg-black text-white" },
+                // 相機區域
+                React.createElement('div', { className: "relative h-[65%] w-full bg-zinc-950 flex items-center justify-center overflow-hidden border-b border-white/5" },
+                    viewingPhoto ? 
+                    // 查看模式
+                    React.createElement('div', { className: "relative w-full h-full flex items-center justify-center" },
+                        React.createElement('img', { 
+                            ref: imgRef, 
+                            src: viewingPhoto.url, 
+                            className: "max-w-[90%] max-h-[80%] rounded-xl shadow-2xl",
+                            onClick: (e) => {
+                                const rect = e.target.getBoundingClientRect();
+                                const x = ((e.clientX - rect.left) / rect.width) * 1920; // 假定原始寬度
+                                const y = ((e.clientY - rect.top) / rect.height) * 1080;
+                                setCrosshair({x, y});
+                            }
+                        }),
+                        React.createElement('button', { 
+                            className: "absolute top-6 left-6 p-3 bg-white/10 rounded-full backdrop-blur-md",
+                            onClick: () => setViewingPhoto(null)
+                        }, React.createElement('i', { 'data-lucide': "x" })),
+                        crosshair && React.createElement('div', {
+                            className: "absolute pointer-events-none",
+                            style: { left: `${(crosshair.x/1920)*100}%`, top: `${(crosshair.y/1080)*100}%` }
+                        }, React.createElement('div', { className: "w-20 h-[1px] bg-red-500 absolute -translate-x-1/2" }))
+                    ) : 
+                    // 攝影模式
+                    React.createElement('div', { className: "relative w-full h-full" },
+                        React.createElement('video', { ref: videoRef, autoPlay: true, playsInline: true, className: `w-full h-full object-cover ${isMirrored ? 'scale-x-[-1]' : ''}` }),
+                        
+                        // 姿態指示器
+                        React.createElement('div', { className: `absolute inset-0 pointer-events-none border-[10px] transition-colors ${isLevel ? 'border-green-500/30' : 'border-red-500/20'}` },
+                            React.createElement('div', { className: "absolute inset-0 flex items-center justify-center" },
+                                React.createElement('div', { className: `w-28 h-28 border rounded-full flex items-center justify-center ${isLevel ? 'border-green-400 scale-105' : 'border-red-500/30'}` },
+                                    React.createElement('div', { className: `w-2 h-2 rounded-full ${isLevel ? 'bg-green-400' : 'bg-red-500'}` })
+                                )
+                            ),
+                            sensorStatus === 'active' && React.createElement('div', { className: "absolute bottom-32 left-1/2 -translate-x-1/2 flex gap-4" },
+                                React.createElement('div', { className: `px-4 py-2 rounded-xl backdrop-blur-md border ${Math.abs(pitch-90)<=3 ? 'bg-green-600/30 border-green-500' : 'bg-red-600/30 border-red-500'}` }, 
+                                    React.createElement('div', { className: "text-[8px] uppercase font-black" }, "Pitch"),
+                                    React.createElement('div', { className: "text-lg font-mono font-bold" }, `${pitch.toFixed(1)}°`)
+                                ),
+                                React.createElement('div', { className: `px-4 py-2 rounded-xl backdrop-blur-md border ${Math.abs(roll)<=3 ? 'bg-green-600/30 border-green-500' : 'bg-red-600/30 border-red-500'}` }, 
+                                    React.createElement('div', { className: "text-[8px] uppercase font-black" }, "Roll"),
+                                    React.createElement('div', { className: "text-lg font-mono font-bold" }, `${roll.toFixed(1)}°`)
+                                )
+                            )
+                        ),
+
+                        // 功能按鈕
+                        React.createElement('div', { className: "absolute top-6 right-6 flex flex-col gap-2 bg-black/40 p-2 rounded-3xl backdrop-blur-md border border-white/10" },
+                            React.createElement('button', { onClick: () => setFacingMode(f => f==='user'?'environment':'user'), className: "w-12 h-12 flex items-center justify-center" }, React.createElement('i', { 'data-lucide': "refresh-cw" })),
+                            React.createElement('button', { onClick: () => setIsMirrored(!isMirrored), className: `w-12 h-12 flex items-center justify-center rounded-2xl ${isMirrored ? 'bg-blue-600' : ''}` }, React.createElement('i', { 'data-lucide': "flip-horizontal" })),
+                            React.createElement('button', { onClick: () => setShowGuide(!showGuide), className: `w-12 h-12 flex items-center justify-center rounded-2xl ${showGuide ? 'bg-blue-600' : ''}` }, React.createElement('i', { 'data-lucide': "grid-3x3" }))
+                        ),
+
+                        // 拍照控制
+                        React.createElement('div', { className: "absolute bottom-10 left-1/2 -translate-x-1/2 flex flex-col items-center gap-4" },
+                            sensorStatus !== 'active' && sensorStatus !== 'bypassed' ?
+                            React.createElement('div', { className: "flex flex-col gap-2 items-center" },
+                                React.createElement('button', { onClick: requestPermission, className: "bg-blue-600 px-8 py-4 rounded-2xl font-black shadow-2xl flex items-center gap-2" }, 
+                                    React.createElement('i', { 'data-lucide': "zap", className: "w-5 h-5" }), "啟動感測器"
+                                ),
+                                React.createElement('button', { onClick: () => setSensorStatus('bypassed'), className: "text-[10px] text-gray-500 underline" }, "手動解鎖拍照")
+                            ) :
+                            React.createElement('button', { 
+                                onClick: takePhoto,
+                                disabled: !isLevel && sensorStatus !== 'bypassed',
+                                className: `p-1.5 rounded-full border-4 transition-all ${isLevel || sensorStatus === 'bypassed' ? 'border-white bg-white/20 scale-110' : 'border-zinc-800 opacity-40'}`
+                            }, React.createElement('div', { className: `w-14 h-14 rounded-full ${isLevel || sensorStatus === 'bypassed' ? 'bg-white' : 'bg-zinc-700'}` }))
+                        )
+                    )
+                ),
+
+                // 相簿區域
+                React.createElement('div', { className: "h-[35%] w-full bg-[#0d0d0d] p-6 flex gap-6" },
+                    React.createElement('div', { className: "w-[65%] flex flex-col gap-4" },
+                        React.createElement('h3', { className: "text-[10px] font-black text-gray-500 uppercase tracking-widest" }, "專業量度相簿"),
+                        React.createElement('div', { className: "flex-1 flex gap-4 overflow-x-auto no-scrollbar" },
+                            photos.map(p => React.createElement('div', { 
+                                key: p.id, 
+                                onClick: () => setViewingPhoto(p),
+                                className: "flex-shrink-0 h-full aspect-[4/3] rounded-2xl overflow-hidden border border-white/10" 
+                            }, React.createElement('img', { src: p.url, className: "w-full h-full object-cover" })))
+                        )
+                    ),
+                    React.createElement('div', { className: "w-[35%] bg-white/5 rounded-[2.5rem] border border-white/5 p-6 flex flex-col justify-between shadow-2xl" },
+                        React.createElement('div', { className: "space-y-4" },
+                            React.createElement('div', { className: "flex items-center gap-4" }, 
+                                React.createElement('i', { 'data-lucide': "sun", className: "text-gray-500" }),
+                                React.createElement('input', { type: "range", min: 50, max: 150, value: brightness, onChange: e => setBrightness(e.target.value) })
+                            ),
+                            React.createElement('div', { className: "flex items-center gap-4" }, 
+                                React.createElement('i', { 'data-lucide': "contrast", className: "text-gray-500" }),
+                                React.createElement('input', { type: "range", min: 50, max: 150, value: contrast, onChange: e => setContrast(e.target.value) })
+                            )
+                        ),
+                        React.createElement('button', { className: "w-full py-4 bg-zinc-800 rounded-2xl font-black text-xs flex items-center justify-center gap-2" }, 
+                            React.createElement('i', { 'data-lucide': "share-2", className: "w-4 h-4" }), "導出照片"
+                        )
+                    )
+                )
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(React.createElement(App));
+    </script>
+</body>
+</html>
